@@ -234,8 +234,7 @@ bool CustomTracer::clock(SST::Cycle_t current) {
                 //bool wasMshr = wasMshrHit(me->getID());
                 bool wasMshr = false;
 
-                //bool wasPrefetched = wasPrefetched(me->getID());
-                bool wasPrefetched = false;
+                bool wasPrefetched = CustomTracer::wasPrefetched(me->getID());
 
                 /*traceOut->verbose(
                     CALL_INFO, 1, 0,

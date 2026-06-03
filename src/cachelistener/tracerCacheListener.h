@@ -1,9 +1,9 @@
 #ifndef SST_CUSTOM_TRACER_TRACERCACHELISTENER_H
 #define SST_CUSTOM_TRACER_TRACERCACHELISTENER_H
 
-#include <semaphore.h>
 #include <sst/elements/memHierarchy/cacheListener.h>
-#include "../portmodule/tracerPortModule.h"
+#include <unordered_set>
+#include <mutex>
 
 class TracerCacheListener : public MemHierarchy::CacheListener {
 public:
@@ -21,13 +21,12 @@ public:
     void notifyAccess(const MemHierarchy::CacheListenerNotification& notify) override;
 
 private:
-    Output *out;
-    //std::unordered_map<MemHierarchy::Addr, bool> tracedCacheLines;
+    Output* out;
 
-    //TracerPortModule *connectedPortModule = nullptr;
-
-    //inline void initConnectedPortModule(bool throwErr);
-    //inline MemHierarchy::MemEvent* getMemEventFromPortModule(const MemHierarchy::CacheListenerNotification& notify);
+    // Tracks addresses loaded into cache by the prefetcher, not yet demanded.
+    // When a READ HIT arrives for one of these addresses, it is a prefetch hit.
+    std::unordered_set<MemHierarchy::Addr> prefetchedCacheLines;
+    std::mutex prefetchedCacheLinesMutex;
 };
 
 

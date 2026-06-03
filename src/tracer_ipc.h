@@ -6,8 +6,13 @@
 #define SST_CUSTOM_TRACER_TRACER_IPC2_H
 
 
+#ifndef __cplusplus
 #include <stdatomic.h>
 #include <stdbool.h>
+#else
+#include <cstdint>
+#include <cstdbool>
+#endif
 #include <stdint.h>
 #include <pthread.h>
 
