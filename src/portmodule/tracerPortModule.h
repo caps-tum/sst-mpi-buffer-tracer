@@ -41,7 +41,8 @@ public:
     void interceptHandler(uintptr_t key, SST::Event*& ev, bool& cancel) override;
 
     bool installOnReceive() override { return true; }
-    bool installOnSend() override { return false; }
+    // send notification needed for L2, L3, and Mem to clean up their inFlight sets on response
+    bool installOnSend() override { return pm_dataSrc == L2 || pm_dataSrc == L3; }
 
 protected:
     //void serialize_order(SST::Core::Serialization::serializer& ser) override;

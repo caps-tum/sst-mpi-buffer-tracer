@@ -40,14 +40,11 @@ uintptr_t TracerPortModule::registerLinkAttachTool(const SST::AttachPointMetaDat
 void TracerPortModule::eventSent(uintptr_t key, SST::Event*& ev) {
     // bool installOnSend() needs to return true for this to be called
 
-    /*auto *me = dynamic_cast<SST::MemHierarchy::MemEvent *>(ev);
+    auto *me = dynamic_cast<SST::MemHierarchy::MemEvent *>(ev);
+    if (me == nullptr) return;
 
-    if (me == nullptr) {
-        out->verbose(CALL_INFO, 1, 0, "[WARN] PortModule received non-MemEvent.\n");
-        return;
-    }
-
-    mshr.erase(me->getAddr());*/
+    if (pm_dataSrc == L2) CustomTracer::removeInFlightL2Address(me->getBaseAddr());
+    if (pm_dataSrc == L3) CustomTracer::removeInFlightL3Address(me->getBaseAddr());
 }
 
 uintptr_t TracerPortModule::registerHandlerIntercept(const SST::AttachPointMetaData& mdata) {
@@ -79,6 +76,13 @@ void TracerPortModule::interceptHandler(uintptr_t key, SST::Event*& ev, bool& ca
         stat_traced_events->addData(1);
 
         CustomTracer::storeDataSrcForID(me->getID(), pm_dataSrc);
+
+        // Track this address as in-flight at the next level up
+        if (pm_dataSrc == L2)  CustomTracer::addInFlightL2Address(me->getBaseAddr());
+        if (pm_dataSrc == L3)  CustomTracer::addInFlightL3Address(me->getBaseAddr());
+        // If the address is already in-flight at the next level, this is an MSHR hit
+        if (pm_dataSrc == L1 && CustomTracer::isInFlightL2(me->getBaseAddr())) CustomTracer::markAsMshrHit(me->getID());
+        if (pm_dataSrc == L2 && CustomTracer::isInFlightL3(me->getBaseAddr())) CustomTracer::markAsMshrHit(me->getID());
 
         /*if (mshr.count(me->getAddr()) > 0) {
             CustomTracer::markAsMshrHit(me->getID());

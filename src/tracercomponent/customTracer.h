@@ -18,6 +18,7 @@
 
 #include <set>
 #include <map>
+#include <unordered_set>
 
 #define MEM_TRACE_BUFFER_SIZE 1024
 #define MPI_TRACE_BUFFER_SIZE 1024
@@ -154,6 +155,40 @@ public:
         mshrEvents.insert(id);
     }
 
+
+    // Methods for MSHR detection in port modules. For each boundary (L1->L2, L2->L3) we
+    // track addresses currently in-flight so that a second request arriving at the lower level
+    // while the first is still pending can be flagged as an MSHR hit.
+
+    static void addInFlightL2Address(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(inFlightL2AddressesMutex);
+        inFlightL2Addresses.insert(addr);
+    }
+    static void removeInFlightL2Address(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(inFlightL2AddressesMutex);
+        auto it = inFlightL2Addresses.find(addr);
+        if (it != inFlightL2Addresses.end()) inFlightL2Addresses.erase(it);
+    }
+    static bool isInFlightL2(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(inFlightL2AddressesMutex);
+        return inFlightL2Addresses.find(addr) != inFlightL2Addresses.end();
+    }
+
+    static void addInFlightL3Address(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(inFlightL3AddressesMutex);
+        inFlightL3Addresses.insert(addr);
+    }
+    static void removeInFlightL3Address(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(inFlightL3AddressesMutex);
+        auto it = inFlightL3Addresses.find(addr);
+        if (it != inFlightL3Addresses.end()) inFlightL3Addresses.erase(it);
+    }
+    static bool isInFlightL3(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(inFlightL3AddressesMutex);
+        return inFlightL3Addresses.find(addr) != inFlightL3Addresses.end();
+    }
+
+
 private:
     SST::Output *out;
     //SST::Output *debugOut;
@@ -180,6 +215,13 @@ private:
 
     static std::map<SST::Event::id_type, DataSrc> dataSrcs; // The portmodules write the <id, dataSrc> of the MemEvents to this
     static std::mutex dataSrcsMutex;
+
+    static std::unordered_multiset<uint64_t> inFlightL2Addresses;
+    static std::mutex inFlightL2AddressesMutex;
+
+    static std::unordered_multiset<uint64_t> inFlightL3Addresses;
+    static std::mutex inFlightL3AddressesMutex;
+
 
     static std::set<SST::Event::id_type> mshrEvents; // The portModules write the IDs of the events that got a cache hit in their MSHR to this set
     static std::mutex mshrEventsMutex;
