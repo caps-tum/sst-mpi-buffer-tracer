@@ -156,36 +156,26 @@ public:
     }
 
 
-    // Methods for MSHR detection in port modules. For each boundary (L1->L2, L2->L3) we
-    // track addresses currently in-flight so that a second request arriving at the lower level
-    // while the first is still pending can be flagged as an MSHR hit.
+    // Methods for MSHR detection at the L1/L2 boundary. We track addresses of read requests that
+    // missed in L1 and are still outstanding (forwarded to L2, response not back yet).
+    // If a next request for the same address reaches L1 during that window, it's an L1 MSHR hit. 
+    // This tracer only runs at corecount=1, where L1 absorbs the duplicate before it can
+    // reach L2, so L1 is the only level where this can be observed. 
+    // (Hence no sets to track outstanding misses for L2/L3.)
+    // On response, the address is removed from the outstanding set.
 
-    static void addInFlightL2Address(uint64_t addr) {
-        std::lock_guard<std::mutex> lock(inFlightL2AddressesMutex);
-        inFlightL2Addresses.insert(addr);
+    static void addOutstandingL1Miss(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(outstandingL1MissAddressesMutex);
+        outstandingL1MissAddresses.insert(addr);
     }
-    static void removeInFlightL2Address(uint64_t addr) {
-        std::lock_guard<std::mutex> lock(inFlightL2AddressesMutex);
-        auto it = inFlightL2Addresses.find(addr);
-        if (it != inFlightL2Addresses.end()) inFlightL2Addresses.erase(it);
+    static void removeOutstandingL1Miss(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(outstandingL1MissAddressesMutex);
+        auto it = outstandingL1MissAddresses.find(addr);
+        if (it != outstandingL1MissAddresses.end()) outstandingL1MissAddresses.erase(it);
     }
-    static bool isInFlightL2(uint64_t addr) {
-        std::lock_guard<std::mutex> lock(inFlightL2AddressesMutex);
-        return inFlightL2Addresses.find(addr) != inFlightL2Addresses.end();
-    }
-
-    static void addInFlightL3Address(uint64_t addr) {
-        std::lock_guard<std::mutex> lock(inFlightL3AddressesMutex);
-        inFlightL3Addresses.insert(addr);
-    }
-    static void removeInFlightL3Address(uint64_t addr) {
-        std::lock_guard<std::mutex> lock(inFlightL3AddressesMutex);
-        auto it = inFlightL3Addresses.find(addr);
-        if (it != inFlightL3Addresses.end()) inFlightL3Addresses.erase(it);
-    }
-    static bool isInFlightL3(uint64_t addr) {
-        std::lock_guard<std::mutex> lock(inFlightL3AddressesMutex);
-        return inFlightL3Addresses.find(addr) != inFlightL3Addresses.end();
+    static bool isOutstandingL1Miss(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(outstandingL1MissAddressesMutex);
+        return outstandingL1MissAddresses.find(addr) != outstandingL1MissAddresses.end();
     }
 
 
@@ -216,11 +206,8 @@ private:
     static std::map<SST::Event::id_type, DataSrc> dataSrcs; // The portmodules write the <id, dataSrc> of the MemEvents to this
     static std::mutex dataSrcsMutex;
 
-    static std::unordered_multiset<uint64_t> inFlightL2Addresses;
-    static std::mutex inFlightL2AddressesMutex;
-
-    static std::unordered_multiset<uint64_t> inFlightL3Addresses;
-    static std::mutex inFlightL3AddressesMutex;
+    static std::unordered_multiset<uint64_t> outstandingL1MissAddresses;
+    static std::mutex outstandingL1MissAddressesMutex;
 
 
     static std::set<SST::Event::id_type> mshrEvents; // The portModules write the IDs of the events that got a cache hit in their MSHR to this set

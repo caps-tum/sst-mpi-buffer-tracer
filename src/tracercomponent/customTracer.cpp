@@ -24,11 +24,8 @@ std::mutex CustomTracer::prefetchedMutex;
 std::set<SST::Event::id_type> CustomTracer::mshrEvents;
 std::mutex CustomTracer::mshrEventsMutex;
 
-std::unordered_multiset<uint64_t> CustomTracer::inFlightL2Addresses;
-std::mutex CustomTracer::inFlightL2AddressesMutex;
-
-std::unordered_multiset<uint64_t> CustomTracer::inFlightL3Addresses;
-std::mutex CustomTracer::inFlightL3AddressesMutex;
+std::unordered_multiset<uint64_t> CustomTracer::outstandingL1MissAddresses;
+std::mutex CustomTracer::outstandingL1MissAddressesMutex;
 
 
 CustomTracer::CustomTracer(SST::ComponentId_t id, SST::Params &params) : SST::Component(id) {

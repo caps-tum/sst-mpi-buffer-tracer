@@ -42,9 +42,9 @@ void TracerPortModule::eventSent(uintptr_t key, SST::Event*& ev) {
 
     auto *me = dynamic_cast<SST::MemHierarchy::MemEvent *>(ev);
     if (me == nullptr) return;
-
-    if (pm_dataSrc == L2) CustomTracer::removeInFlightL2Address(me->getBaseAddr());
-    if (pm_dataSrc == L3) CustomTracer::removeInFlightL3Address(me->getBaseAddr());
+    
+    // The response is heading back up to L1, so the L1 miss is resolved. Clear it from the outstanding set.
+    if (pm_dataSrc == L2) CustomTracer::removeOutstandingL1Miss(me->getBaseAddr());
 }
 
 uintptr_t TracerPortModule::registerHandlerIntercept(const SST::AttachPointMetaData& mdata) {
@@ -77,12 +77,10 @@ void TracerPortModule::interceptHandler(uintptr_t key, SST::Event*& ev, bool& ca
 
         CustomTracer::storeDataSrcForID(me->getID(), pm_dataSrc);
 
-        // Track this address as in-flight at the next level up
-        if (pm_dataSrc == L2)  CustomTracer::addInFlightL2Address(me->getBaseAddr());
-        if (pm_dataSrc == L3)  CustomTracer::addInFlightL3Address(me->getBaseAddr());
-        // If the address is already in-flight at the next level, this is an MSHR hit
-        if (pm_dataSrc == L1 && CustomTracer::isInFlightL2(me->getBaseAddr())) CustomTracer::markAsMshrHit(me->getID());
-        if (pm_dataSrc == L2 && CustomTracer::isInFlightL3(me->getBaseAddr())) CustomTracer::markAsMshrHit(me->getID());
+        // A traced request reaching the L1->L2 port missed in L1, so we mark its address as outstanding.
+        if (pm_dataSrc == L2)  CustomTracer::addOutstandingL1Miss(me->getBaseAddr());
+        // A request reaching L1, its address is already outstanding is an L1 MSHR hit, so we mark it as such.
+        if (pm_dataSrc == L1 && CustomTracer::isOutstandingL1Miss(me->getBaseAddr())) CustomTracer::markAsMshrHit(me->getID());
 
         /*if (mshr.count(me->getAddr()) > 0) {
             CustomTracer::markAsMshrHit(me->getID());
