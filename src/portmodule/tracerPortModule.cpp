@@ -40,14 +40,11 @@ uintptr_t TracerPortModule::registerLinkAttachTool(const SST::AttachPointMetaDat
 void TracerPortModule::eventSent(uintptr_t key, SST::Event*& ev) {
     // bool installOnSend() needs to return true for this to be called
 
-    /*auto *me = dynamic_cast<SST::MemHierarchy::MemEvent *>(ev);
-
-    if (me == nullptr) {
-        out->verbose(CALL_INFO, 1, 0, "[WARN] PortModule received non-MemEvent.\n");
-        return;
-    }
-
-    mshr.erase(me->getAddr());*/
+    auto *me = dynamic_cast<SST::MemHierarchy::MemEvent *>(ev);
+    if (me == nullptr) return;
+    
+    // The response is heading back up to L1, so the L1 miss is resolved. Clear it from the outstanding set.
+    if (pm_dataSrc == L2) CustomTracer::removeOutstandingL1Miss(me->getBaseAddr());
 }
 
 uintptr_t TracerPortModule::registerHandlerIntercept(const SST::AttachPointMetaData& mdata) {
@@ -79,6 +76,11 @@ void TracerPortModule::interceptHandler(uintptr_t key, SST::Event*& ev, bool& ca
         stat_traced_events->addData(1);
 
         CustomTracer::storeDataSrcForID(me->getID(), pm_dataSrc);
+
+        // A traced request reaching the L1->L2 port missed in L1, so we mark its address as outstanding.
+        if (pm_dataSrc == L2)  CustomTracer::addOutstandingL1Miss(me->getBaseAddr());
+        // A request reaching L1, its address is already outstanding is an L1 MSHR hit, so we mark it as such.
+        if (pm_dataSrc == L1 && CustomTracer::isOutstandingL1Miss(me->getBaseAddr())) CustomTracer::markAsMshrHit(me->getID());
 
         /*if (mshr.count(me->getAddr()) > 0) {
             CustomTracer::markAsMshrHit(me->getID());

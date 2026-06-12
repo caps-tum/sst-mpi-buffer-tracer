@@ -18,6 +18,7 @@
 
 #include <set>
 #include <map>
+#include <unordered_set>
 
 #define MEM_TRACE_BUFFER_SIZE 1024
 #define MPI_TRACE_BUFFER_SIZE 1024
@@ -154,6 +155,30 @@ public:
         mshrEvents.insert(id);
     }
 
+
+    // Methods for MSHR detection at the L1/L2 boundary. We track addresses of read requests that
+    // missed in L1 and are still outstanding (forwarded to L2, response not back yet).
+    // If a next request for the same address reaches L1 during that window, it's an L1 MSHR hit. 
+    // This tracer only runs at corecount=1, where L1 absorbs the duplicate before it can
+    // reach L2, so L1 is the only level where this can be observed. 
+    // (Hence no sets to track outstanding misses for L2/L3.)
+    // On response, the address is removed from the outstanding set.
+
+    static void addOutstandingL1Miss(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(outstandingL1MissAddressesMutex);
+        outstandingL1MissAddresses.insert(addr);
+    }
+    static void removeOutstandingL1Miss(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(outstandingL1MissAddressesMutex);
+        auto it = outstandingL1MissAddresses.find(addr);
+        if (it != outstandingL1MissAddresses.end()) outstandingL1MissAddresses.erase(it);
+    }
+    static bool isOutstandingL1Miss(uint64_t addr) {
+        std::lock_guard<std::mutex> lock(outstandingL1MissAddressesMutex);
+        return outstandingL1MissAddresses.find(addr) != outstandingL1MissAddresses.end();
+    }
+
+
 private:
     SST::Output *out;
     //SST::Output *debugOut;
@@ -180,6 +205,10 @@ private:
 
     static std::map<SST::Event::id_type, DataSrc> dataSrcs; // The portmodules write the <id, dataSrc> of the MemEvents to this
     static std::mutex dataSrcsMutex;
+
+    static std::unordered_multiset<uint64_t> outstandingL1MissAddresses;
+    static std::mutex outstandingL1MissAddressesMutex;
+
 
     static std::set<SST::Event::id_type> mshrEvents; // The portModules write the IDs of the events that got a cache hit in their MSHR to this set
     static std::mutex mshrEventsMutex;

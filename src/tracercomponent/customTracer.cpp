@@ -24,6 +24,10 @@ std::mutex CustomTracer::prefetchedMutex;
 std::set<SST::Event::id_type> CustomTracer::mshrEvents;
 std::mutex CustomTracer::mshrEventsMutex;
 
+std::unordered_multiset<uint64_t> CustomTracer::outstandingL1MissAddresses;
+std::mutex CustomTracer::outstandingL1MissAddressesMutex;
+
+
 CustomTracer::CustomTracer(SST::ComponentId_t id, SST::Params &params) : SST::Component(id) {
     out = new SST::Output("CustomTracer[@f:@l:@p] ", 1, 0, SST::Output::STDOUT);
 
@@ -231,10 +235,9 @@ bool CustomTracer::clock(SST::Cycle_t current) {
 
                 auto me_level = getDataSrcForID(me->getID());
 
-                //bool wasMshr = wasMshrHit(me->getID());
-                bool wasMshr = false;
+                bool wasMshr = wasMshrHit(me->getID());
 
-                //bool wasPrefetched = wasPrefetched(me->getID());
+                // bool wasPrefetched = CustomTracer::wasPrefetched(me->getID());
                 bool wasPrefetched = false;
 
                 /*traceOut->verbose(
