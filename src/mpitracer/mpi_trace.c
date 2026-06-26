@@ -141,13 +141,19 @@ int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag, 
 
     clock_gettime(CLOCK_MONOTONIC, &end_t);
 
+    // We send the size (a plain int) through the tunnel
+    int dtSize;
+    MPI_Type_size(datatype, &dtSize);
+
     MpiTrace mpi_trace = {
         .callRank = rank,
         .function = MPI_IRECV,
         .buffAddr = (uint64_t) buf,
+        .request = (uintptr_t) request,
         .buffMinSize = get_MPI_buffer_size(count, datatype),
         .count = count,
         .datatype = datatype,
+        .datatypeSize = dtSize,
         .targetRank = source,
         .comm = comm,
         .tag = tag,
@@ -228,6 +234,64 @@ int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_
 
     tunnel_mpi_traces_send(mpi_traces_tunnel, &mpi_trace, rank % MAX_PRODUCERS);
 
+    return ret;
+}
+
+int MPI_Init(int *argc, char ***argv) {
+    struct timespec start_t, end_t;
+
+    clock_gettime(CLOCK_MONOTONIC, &start_t);
+
+    // Here we call PMPI_Init first and then get the rank, since MPI_Comm_rank only works after Init
+    int ret = PMPI_Init(argc,argv);
+    clock_gettime(CLOCK_MONOTONIC, &end_t);
+
+    int tret = init_tunnels();
+    if (tret != 0) {
+        return MPI_ERR_OTHER;
+    }
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    MpiTrace mpi_trace = {
+        .callRank = rank,
+        .function = MPI_INIT,
+        .startTimestamp = (uint64_t) start_t.tv_sec * 1000000000ULL + start_t.tv_nsec,
+        .endTimestamp = (uint64_t) end_t.tv_sec * 1000000000ULL + end_t.tv_nsec,
+        .callIdentifier = (uintptr_t) __builtin_return_address(0),
+    };
+
+    tunnel_mpi_traces_send(mpi_traces_tunnel, &mpi_trace, rank % MAX_PRODUCERS);
+
+    return ret;
+}
+
+
+int MPI_Finalize(void) {
+    if (init_tunnels() != 0) {
+        return MPI_ERR_OTHER;
+    }
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    struct timespec start_t, end_t;
+    clock_gettime(CLOCK_MONOTONIC, &start_t);
+
+    int ret = PMPI_Finalize();
+
+    clock_gettime(CLOCK_MONOTONIC, &end_t);
+    
+    MpiTrace mpi_trace = {
+        .callRank = rank,
+        .function = MPI_FINALIZE,
+        .startTimestamp = (uint64_t) start_t.tv_sec * 1000000000ULL + start_t.tv_nsec,
+        .endTimestamp   = (uint64_t) end_t.tv_sec * 1000000000ULL + end_t.tv_nsec,
+        .callIdentifier = (uintptr_t) __builtin_return_address(0),
+    };
+
+    tunnel_mpi_traces_send(mpi_traces_tunnel, &mpi_trace, rank % MAX_PRODUCERS);
     return ret;
 }
 

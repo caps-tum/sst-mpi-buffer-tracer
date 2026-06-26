@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <bitset>
+#include <filesystem>
 
 #include "../tracer_common.h"
 #include "../tracer_ipc.h"
@@ -26,6 +27,8 @@ std::mutex CustomTracer::mshrEventsMutex;
 
 std::unordered_multiset<uint64_t> CustomTracer::outstandingL1MissAddresses;
 std::mutex CustomTracer::outstandingL1MissAddressesMutex;
+
+std::atomic<uint64_t> CustomTracer::loadCountByLevel[5]; // zero-initialized (static storage)
 
 
 CustomTracer::CustomTracer(SST::ComponentId_t id, SST::Params &params) : SST::Component(id) {
@@ -48,15 +51,20 @@ CustomTracer::CustomTracer(SST::ComponentId_t id, SST::Params &params) : SST::Co
         debugOut = new SST::Output("", 1, 0, SST::Output::FILE, debugFile);
     }*/
 
-    auto memTraceOut = params.find<std::string>("mem_trace_out", "mem-traces.csv");
+    auto memTraceOut = params.find<std::string>("mem_trace_out", "out/data/samples.csv");
     if (!memTraceOut.empty()) {
+        // ofstream::open does not create directories - make the parent dir (e.g. <out_dir>/data) first
+        std::filesystem::create_directories(std::filesystem::path(memTraceOut).parent_path());
         memTraceFile.open(memTraceOut);
     } else {
         out->fatal(CALL_INFO, -1, "Could not parse 'mem_trace_out' parameter.\n");
     }
 
-    auto mpiTraceOut = params.find<std::string>("mpi_trace_out", "mpi-traces.csv");
+    measurementsOut = (std::filesystem::path(memTraceOut).parent_path() / "sst-measurements.csv").string();
+
+    auto mpiTraceOut = params.find<std::string>("mpi_trace_out", "out/data/mpi_traces.csv");
     if (!mpiTraceOut.empty()) {
+        std::filesystem::create_directories(std::filesystem::path(mpiTraceOut).parent_path());
         mpiTraceFile.open(mpiTraceOut);
     } else {
         out->fatal(CALL_INFO, -1, "Could not parse 'mpi_trace_out' parameter.\n");
@@ -64,7 +72,8 @@ CustomTracer::CustomTracer(SST::ComponentId_t id, SST::Params &params) : SST::Co
 
     // Write CSV headers
     memTraceFile << getMemTraceCsvHeader() << "\n";
-    mpiTraceFile << getMpiTraceCsvHeader() << "\n";
+    // Mitoshooks MPI traces do not have a header
+    // mpiTraceFile << getMpiTraceCsvHeader() << "\n";
 
     // Get filter options
     disableFilter = params.find<bool>("disable_filter", false);
@@ -118,6 +127,7 @@ void CustomTracer::init(unsigned int phase) {
 
 void CustomTracer::setup() {
     out->verbose(CALL_INFO, 1, 0, "Component is being setup.\n");
+    simStartNano = getCurrentSimTimeNano();
 }
 
 void CustomTracer::complete(unsigned int phase) {
@@ -146,6 +156,24 @@ void CustomTracer::finish() {
     // Close output files
     memTraceFile.close();
     mpiTraceFile.close();
+
+    // Write whole-program PAPI-style aggregates for the model's parse_papi_measurements (--sst mode).
+    uint64_t durationNs = getCurrentSimTimeNano() - simStartNano;
+    uint64_t totalLoads = loadCountByLevel[L1].load(std::memory_order_relaxed);
+    uint64_t l1Misses   = loadCountByLevel[L2].load(std::memory_order_relaxed);
+    uint64_t l3Misses   = loadCountByLevel[MEM].load(std::memory_order_relaxed);
+    std::ofstream measFile(measurementsOut);
+    if (measFile.is_open()) {
+        measFile << "PAPI_LD_INS," << totalLoads << "\n";
+        measFile << "PAPI_L1_LDM," << l1Misses << "\n";
+        measFile << "PAPI_L3_LDM," << l3Misses << "\n";
+        measFile << "PAPI_TOT_CYC," << getCurrentSimCycle() << "\n";
+        measFile << "time," << durationNs << "\n";
+        measFile << "mem_traffic," << l3Misses << "\n"; // MEM-served load count
+        measFile.close();
+    } else {
+        out->verbose(CALL_INFO, 1, 0, "Could not open measurements file %s\n", measurementsOut.c_str());
+    }
 
     if (!dataSrcs.empty()) {
         out->fatal(
@@ -199,8 +227,10 @@ bool CustomTracer::clock(SST::Cycle_t current) {
                     continue;
                 }
 
-                // store timestamp of request, so we can later calculate latency when the response comes back
-                requestTimestamps[me->getID()] = currentCycle;
+                // Store the request's start cycle (for cycle-accurate latency) and its start time in ns
+                // (for the timestamp). getCurrentSimTimeNano() shares the global sim-time base with the MPI
+                // traces, so samples.csv and mpi_traces.csv end up on the same nanosecond timeline.
+                requestTimestamps[me->getID()] = { currentCycle, getCurrentSimTimeNano() };
 
                 // set a custom flag in the memory event, we later use this flag in our PortModule to filter the mem events that should be traced
                 //me->setFlag(MEM_FLAG_TRACE);
@@ -230,8 +260,9 @@ bool CustomTracer::clock(SST::Cycle_t current) {
 
             auto entry = requestTimestamps.find(me->getID());
             if (entry != requestTimestamps.end()) {
-                uint64_t startTime = entry->second;
-                uint32_t latency = currentCycle - startTime;
+                uint64_t startCycle = entry->second.first;
+                uint64_t startNano  = entry->second.second;
+                uint32_t latency = currentCycle - startCycle; // latency stays in cycles (matches mitos PEBS)
 
                 auto me_level = getDataSrcForID(me->getID());
 
@@ -252,7 +283,7 @@ bool CustomTracer::clock(SST::Cycle_t current) {
                     .core = static_cast<uint32_t>(i),
                     .dataSource = me_level,
                     .loadLatency = latency,
-                    .timestamp = startTime,
+                    .timestamp = startNano, // nanoseconds (was cycles); same time base as mpi_traces.csv
                     .mpiProcessNr = 0,
                     .memAddr = me->getVirtualAddress(),
                     .prefetched = wasPrefetched,
@@ -371,15 +402,21 @@ void CustomTracer::tunnelReaderLoop() {
 }
 
 std::string CustomTracer::getMemTraceCsvHeader() {
-    return "timestamp,address,core,dataSource,loadLatency,prefetched,mpiProcessNr,command,mshr";
+    return "time,addr,core,level,latency,prefetched,pid,command,mshr";
+}
+
+static const char* levelToString(const MemTrace& t) {
+    int idx = (int) t.dataSource;
+    if (idx < 0 || idx > MEM) return "Unknown";
+    return dataSrcNames[idx];
 }
 
 std::string CustomTracer::formatMemTraceCsv(const MemTrace &trace) {
     std::ostringstream oss;
     oss << trace.timestamp << ","
-            << "0x" << std::hex << trace.memAddr << std::dec << ","
+            << trace.memAddr << std::dec << ","
             << trace.core << ","
-            << dataSrcNames[trace.dataSource] << ","
+            << levelToString(trace) << ","
             << trace.loadLatency << ","
             << (trace.prefetched ? "true" : "false") << ","
             << trace.mpiProcessNr << ","
@@ -388,22 +425,23 @@ std::string CustomTracer::formatMemTraceCsv(const MemTrace &trace) {
     return oss.str();
 }
 
-std::string CustomTracer::getMpiTraceCsvHeader() {
-    return "callRank,function,callIdentifier,startTimestamp,endTimestamp,buffAddr,count,datatype,targetRank,comm,tag";
-}
+// std::string CustomTracer::getMpiTraceCsvHeader() {
+//     return "callRank,function,callIdentifier,startTimestamp,endTimestamp,buffAddr,count,datatype,targetRank,comm,tag";
+// }
 
 std::string CustomTracer::formatMpiTraceCsv(const MpiTrace &trace) {
     std::ostringstream oss;
-    oss << trace.callRank << ","
-            << mpiFunctionNames[trace.function] << ","
-            << "0x" << std::hex << trace.callIdentifier << std::dec << ","
-            << trace.startTimestamp << ","
-            << trace.endTimestamp << ","
-            << "0x" << std::hex << trace.buffAddr << std::dec << ","
-            << trace.count << ","
-            << trace.datatype << ","
-            << trace.targetRank << ","
-            << trace.comm << ","
+    oss << trace.callRank << ";"
+            << mpiFunctionNames[trace.function] << ";"
+            << trace.callIdentifier << ";"
+            << trace.startTimestamp << ";"
+            << trace.endTimestamp << ";"
+            << trace.buffAddr << ";"
+            << trace.count << ";"
+            << trace.datatypeSize << ";"
+            << trace.targetRank << ";"
+            << trace.comm << ";"
+            << trace.request << ";"
             << trace.tag;
     return oss.str();
 }

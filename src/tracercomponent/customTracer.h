@@ -178,6 +178,20 @@ public:
         return outstandingL1MissAddresses.find(addr) != outstandingL1MissAddresses.end();
     }
 
+    // Whole-program load counters (PAPI-style aggregates for sst-measurements.csv).
+    // The portmodules call this for every load passing their cache level, regardless of the
+    // MPI address filter. A request at a level's highlink means the load reached that level:
+    //   count at L1  = total loads (PAPI_LD_INS)
+    //   count at L2  = L1 misses   (PAPI_L1_LDM)
+    //   count at Mem = L3 misses   (PAPI_L3_LDM / mem_traffic)
+    // Note: on real HW mem_traffic is a separate DRAM counter; on single-core SST that's 
+    // just our L3 misses, so we reuse the same value.
+
+    static void countLoad(DataSrc level) {
+        int idx = (int) level;
+        if (idx >= 0 && idx <= MEM) loadCountByLevel[idx].fetch_add(1, std::memory_order_relaxed);
+    }
+
 
 private:
     SST::Output *out;
@@ -190,6 +204,10 @@ private:
     std::ofstream mpiTraceFile;
     std::string frequency;
 
+    // Whole-program aggregate stats (written to sst-measurements.csv at finish())
+    std::string measurementsOut;
+    uint64_t simStartNano = 0;
+
     // Links
     std::vector<SST::Link*> cpuLinks;
     std::vector<SST::Link*> memLinks;
@@ -201,10 +219,12 @@ private:
     Statistic<uint64_t>* statTracedMemHits = registerStatistic<uint64_t>("TracedMemHits");
     Statistic<uint64_t>* statTotalMemTraced = registerStatistic<uint64_t>("TotalMemTraced");
 
-    std::map<SST::Event::id_type, uint64_t> requestTimestamps;
+    std::map<SST::Event::id_type, std::pair<uint64_t, uint64_t>> requestTimestamps; // value = {start cycle (latency), start nanosecond (timestamp)}
 
     static std::map<SST::Event::id_type, DataSrc> dataSrcs; // The portmodules write the <id, dataSrc> of the MemEvents to this
     static std::mutex dataSrcsMutex;
+
+    static std::atomic<uint64_t> loadCountByLevel[5]; // PAPI-style whole-program load counts, indexed by DataSrc level
 
     static std::unordered_multiset<uint64_t> outstandingL1MissAddresses;
     static std::mutex outstandingL1MissAddressesMutex;

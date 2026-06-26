@@ -113,8 +113,8 @@ for i, apparg in enumerate(args.args):
 # Tracer Params
 tracer_params = {
     "clock": clock,
-    "mpi_trace_out": args.out_dir + "/mpi-traces.csv",
-    "mem_trace_out": args.out_dir + "/mem-traces.csv",
+    "mpi_trace_out": args.out_dir + "/data/mpi_traces.csv",
+    "mem_trace_out": args.out_dir + "/data/samples.csv",
     "debug": "8",
     "corecount": str(corecount)
 }

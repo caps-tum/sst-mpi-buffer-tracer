@@ -67,6 +67,14 @@ void TracerPortModule::interceptHandler(uintptr_t key, SST::Event*& ev, bool& ca
         return;
     }
 
+    // Count every load that got to  this level (independent of the MPI filter) for the whole-program
+    // PAPI-style aggregates written to sst-measurements.csv. A request reaching this port means the
+    // load got to this level: L1 = total loads, L2 = L1 misses, Mem = L3 misses. 
+    if (!me->isResponse() &&
+        (me->getCmd() == SST::MemHierarchy::Command::GetS || me->getCmd() == SST::MemHierarchy::Command::GetSX)) {
+        CustomTracer::countLoad(pm_dataSrc);
+    }
+
     // check if memory event should be traced
     if (me->getMemFlags() & MEM_FLAG_TRACE) {
         if (me->isResponse()) {

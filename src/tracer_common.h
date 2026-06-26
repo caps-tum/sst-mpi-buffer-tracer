@@ -41,7 +41,9 @@ typedef enum {
     MPI_IRECV,
     MPI_SEND,
     MPI_WAIT,
-    MPI_WAITALL
+    MPI_WAITALL,
+    MPI_INIT,
+    MPI_FINALIZE
 } MpiFunction;
 
 static const char* mpiFunctionNames[] = {
@@ -49,7 +51,9 @@ static const char* mpiFunctionNames[] = {
     "MPI_Irecv",
     "MPI_Send",
     "MPI_Wait",
-    "MPI_Waitall"
+    "MPI_Waitall",
+    "MPI_Init",
+    "MPI_Finalize"
 };
 
 typedef struct {
@@ -69,9 +73,11 @@ typedef struct {
     uint32_t callRank;
     MpiFunction function;
     uintptr_t buffAddr;
+    uintptr_t request;
     uint32_t buffMinSize;
     int count;
-    MPI_Datatype datatype;
+    MPI_Datatype datatype;     
+    int datatypeSize;          // portable: element size in bytes
     int targetRank;
     MPI_Comm comm;
     int tag;
