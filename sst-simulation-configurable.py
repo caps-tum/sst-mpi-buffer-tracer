@@ -85,6 +85,9 @@ if not os.path.exists(args.out_dir):
 
 corecount = 1  # As we only can trace one MPI rank at a time, we can leave corecount to 1
 clock = "1.7GHz"
+# Override from JSON config if specified
+if cache_config is not None and 'clock' in cache_config:
+    clock = cache_config['clock']
 
 # Ariel params
 ariel_params = {
