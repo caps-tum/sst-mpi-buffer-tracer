@@ -119,6 +119,53 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     return ret;
 }
 
+
+int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request) {
+    if (init_tunnels() != 0) {
+        return MPI_ERR_OTHER;
+    }
+
+    SimpleMpiTrace simple_mpi_trace = {
+        .buffAddr = (uint64_t) buf,
+        .buffMinSize = get_MPI_buffer_size(count, datatype),
+    };
+
+    int rank;
+    MPI_Comm_rank(comm, &rank);
+
+    tunnel_simple_mpi_traces_send(simple_mpi_traces_tunnel, &simple_mpi_trace, rank % MAX_PRODUCERS);
+
+    struct timespec start_t, end_t;
+    clock_gettime(CLOCK_MONOTONIC, &start_t);
+
+    int ret = PMPI_Isend(buf, count, datatype, dest, tag, comm, request);
+
+    clock_gettime(CLOCK_MONOTONIC, &end_t);
+
+    int dtSize;
+    MPI_Type_size(datatype, &dtSize);
+    MpiTrace mpi_trace = {
+        .callRank = rank,
+        .function = MPI_ISEND,
+        .buffAddr = (uint64_t) buf,
+        .request = (uintptr_t) request,
+        .buffMinSize = get_MPI_buffer_size(count, datatype),
+        .count = count,
+        .datatype = datatype,
+        .datatypeSize = dtSize,
+        .targetRank = dest,
+        .comm = comm,
+        .tag = tag,
+        .startTimestamp = (uint64_t) start_t.tv_sec * 1000000000ULL + start_t.tv_nsec,
+        .endTimestamp = (uint64_t) end_t.tv_sec * 1000000000ULL + end_t.tv_nsec,
+        .callIdentifier = (uintptr_t) __builtin_return_address(0),
+    };
+
+    tunnel_mpi_traces_send(mpi_traces_tunnel, &mpi_trace, rank % MAX_PRODUCERS);
+
+    return ret;
+}
+
 int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Request *request) {
     if (init_tunnels() != 0) {
         return MPI_ERR_OTHER;
