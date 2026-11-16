@@ -35,6 +35,13 @@ int init_tunnels() {
     return 0;
 }
 
+// Zero-size or NULL-buffer messages (legal MPI) have nothing to tag, and customTracer aborts on them,
+// so they are skipped here and only go to the full trace.
+static void register_mpi_buffer(SimpleMpiTrace *t, int rank) {
+    if (t->buffAddr != 0 && t->buffMinSize != 0)
+        tunnel_simple_mpi_traces_send(simple_mpi_traces_tunnel, t, rank % MAX_PRODUCERS);
+}
+
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status) {
     if (init_tunnels() != 0) {
         return MPI_ERR_OTHER;
@@ -48,7 +55,7 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
     int rank;
     MPI_Comm_rank(comm, &rank);
 
-    tunnel_simple_mpi_traces_send(simple_mpi_traces_tunnel, &simple_mpi_trace, rank % MAX_PRODUCERS);
+    register_mpi_buffer(&simple_mpi_trace, rank);
 
     struct timespec start_t, end_t;
     clock_gettime(CLOCK_MONOTONIC, &start_t);
@@ -90,7 +97,7 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     int rank;
     MPI_Comm_rank(comm, &rank);
 
-    tunnel_simple_mpi_traces_send(simple_mpi_traces_tunnel, &simple_mpi_trace, rank % MAX_PRODUCERS);
+    register_mpi_buffer(&simple_mpi_trace, rank);
 
     struct timespec start_t, end_t;
     clock_gettime(CLOCK_MONOTONIC, &start_t);
@@ -133,7 +140,7 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int t
     int rank;
     MPI_Comm_rank(comm, &rank);
 
-    tunnel_simple_mpi_traces_send(simple_mpi_traces_tunnel, &simple_mpi_trace, rank % MAX_PRODUCERS);
+    register_mpi_buffer(&simple_mpi_trace, rank);
 
     struct timespec start_t, end_t;
     clock_gettime(CLOCK_MONOTONIC, &start_t);
@@ -179,7 +186,7 @@ int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag, 
     int rank;
     MPI_Comm_rank(comm, &rank);
 
-    tunnel_simple_mpi_traces_send(simple_mpi_traces_tunnel, &simple_mpi_trace, rank % MAX_PRODUCERS);
+    register_mpi_buffer(&simple_mpi_trace, rank);
 
     struct timespec start_t, end_t;
     clock_gettime(CLOCK_MONOTONIC, &start_t);
